@@ -318,14 +318,13 @@ body.dark .pct-c{background:#161d2e}
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <script>
-firebase.initializeApp({apiKey: "AIzaSyBdabXqlBQ-6yVNJKdu8Zhb9Cm_-59_u24",
-      authDomain: "bett-294a2.firebaseapp.com",
-      projectId: "bett-294a2",
-      storageBucket: "bett-294a2.appspot.com",
-      messagingSenderId: "1055511650032",
-      appId: "1:1055511650032:web:7e0f9c28e58515f549ac35"
-  
-  
+firebase.initializeApp({
+  apiKey:"AIzaSyBdabXqlBQ-6yVNJKdu8Jhb9Cm_-59_u24",
+  authDomain:"bett-294a2.firebaseapp.com",
+  projectId:"bett-294a2",
+  storageBucket:"bett-294a2.appspot.com",
+  messagingSenderId:"1055511650032",
+  appId:"1:1055511650032:web:7e0f9c28e58515f549ac35"
 });
 const db   = firebase.firestore();
 const auth = firebase.auth();
@@ -339,17 +338,12 @@ let currentUser = null;
 async function initUser(fbUser){
   if(!fbUser){
     // Not signed in — redirect to login page
-    window.location.href = 'login 1.html';
+    window.location.href = 'login.html';
     return;
   }
   try{
     const snap = await db.collection('users').doc(fbUser.uid).get();
-    if(!snap.exists){
-      // Profile not saved yet or deleted — sign out and go back to login
-      await auth.signOut();
-      window.location.href = 'login.html';
-      return;
-    }
+    if(!snap.exists){ toast('User profile not found','err'); return; }
     currentUser = snap.data();
     currentUser.uid = fbUser.uid;
 
