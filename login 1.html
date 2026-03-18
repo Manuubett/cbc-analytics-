@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -292,6 +293,13 @@ select.inp{cursor:pointer;appearance:none;padding-right:30px}
   color:var(--gold);font-size:11px;font-weight:700;
   margin-top:12px;
 }
+
+/* ── FORGOT LINK ── */
+.forgot-link{
+  font-size:11px;font-weight:700;color:var(--text3);
+  text-decoration:none;transition:color .14s;
+}
+.forgot-link:hover{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -340,7 +348,10 @@ select.inp{cursor:pointer;appearance:none;padding-right:30px}
     </div>
 
     <div class="field">
-      <label>Password</label>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+        <label style="margin-bottom:0">Password</label>
+        <a href="#" class="forgot-link" onclick="showReset();return false">Forgot password?</a>
+      </div>
       <div class="inp-wrap">
         <span class="inp-icon">🔑</span>
         <input class="inp has-eye" type="password" id="liPass" placeholder="••••••••" autocomplete="current-password">
@@ -356,6 +367,42 @@ select.inp{cursor:pointer;appearance:none;padding-right:30px}
     <p style="text-align:center;font-size:11px;color:var(--text3);">
       Don't have an account? 
       <a href="#" style="color:var(--accent);font-weight:700;text-decoration:none" onclick="switchTab('signup');return false">Register here</a>
+    </p>
+  </div>
+
+  <!-- ══════════ RESET PANEL ══════════ -->
+  <div class="panel" id="panelReset">
+    <div style="text-align:center;margin-bottom:18px">
+      <div style="font-size:32px;margin-bottom:8px">🔐</div>
+      <div style="font-family:'Familjen Grotesk',sans-serif;font-size:16px;font-weight:800;color:var(--text)">Reset Password</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-top:4px;line-height:1.5">Enter your email and we'll send<br>a reset link to your inbox.</div>
+    </div>
+
+    <div class="alert err" id="resetErr">
+      <span class="alert-icon">⚠️</span>
+      <span id="resetErrMsg"></span>
+    </div>
+    <div class="alert ok" id="resetOk">
+      <span class="alert-icon">✅</span>
+      <span id="resetOkMsg"></span>
+    </div>
+
+    <div class="field">
+      <label>Email Address</label>
+      <div class="inp-wrap">
+        <span class="inp-icon">✉️</span>
+        <input class="inp" type="email" id="resetEmail" placeholder="you@school.ac.ke" autocomplete="email">
+      </div>
+    </div>
+
+    <button class="submit-btn" id="resetBtn" onclick="doReset()">
+      <span id="resetBtnTxt">Send Reset Link</span>
+    </button>
+
+    <div class="divider">or</div>
+    <p style="text-align:center;font-size:11px;color:var(--text3);">
+      Remember it?
+      <a href="#" style="color:var(--accent);font-weight:700;text-decoration:none" onclick="hideReset();return false">Back to Sign In</a>
     </p>
   </div>
 
@@ -518,8 +565,6 @@ firebase.initializeApp({apiKey: "AIzaSyBdabXqlBQ-6yVNJKdu8Zhb9Cm_-59_u24",
       messagingSenderId: "1055511650032",
       appId: "1:1055511650032:web:7e0f9c28e58515f549ac35"
     
-  
-    
 });
 const db   = firebase.firestore();
 const auth = firebase.auth();
@@ -529,9 +574,24 @@ let manualRedirect = false;
 
 // Only redirect on page load if already authenticated (returning user)
 auth.onAuthStateChanged(u=>{
-  if(manualRedirect) return; // signup/login is handling its own redirect
+  if(manualRedirect) return;
   if(u) window.location.href='marksheet.html';
 });
+
+// ── Show message if redirected back from marksheet with a reason ──
+(function(){
+  const p = new URLSearchParams(window.location.search);
+  const reason = p.get('reason');
+  if(reason === 'suspended'){
+    document.getElementById('loginErrMsg').textContent =
+      'Your account has been suspended. Contact the school administrator.';
+    document.getElementById('loginErr').classList.add('show');
+  } else if(reason === 'pending'){
+    document.getElementById('loginErrMsg').textContent =
+      'Your account is pending admin approval. Please wait for activation.';
+    document.getElementById('loginErr').classList.add('show');
+  }
+})();
 
 // ── Tab switch ──
 function switchTab(t){
@@ -594,8 +654,27 @@ async function doLogin(){
   setLoading('loginBtn','loginBtnTxt',true,'Sign In');
   try{
     manualRedirect = true;
-    await auth.signInWithEmailAndPassword(email, pass);
-    window.location.href = 'index.html';
+    const cred = await auth.signInWithEmailAndPassword(email, pass);
+    // Check status in Firestore before allowing entry
+    const snap = await db.collection('users').doc(cred.user.uid).get();
+    if(snap.exists){
+      const profile = snap.data();
+      if(profile.status === 'pending'){
+        await auth.signOut();
+        manualRedirect = false;
+        setLoading('loginBtn','loginBtnTxt',false,'Sign In');
+        showErr('loginErr','Your account is pending admin approval. Please wait for activation.');
+        return;
+      }
+      if(profile.status === 'suspended'){
+        await auth.signOut();
+        manualRedirect = false;
+        setLoading('loginBtn','loginBtnTxt',false,'Sign In');
+        showErr('loginErr','Your account has been suspended. Contact the school administrator.');
+        return;
+      }
+    }
+    window.location.href = 'marksheet.html';
   }catch(e){
     manualRedirect = false;
     setLoading('loginBtn','loginBtnTxt',false,'Sign In');
@@ -702,11 +781,21 @@ async function doSignup(){
       grade:     grade,
       stream:    stream,
       role:      'teacher',
-      status:    'active',
+      status:    'pending',
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    // Profile is saved — safe to redirect now
-    window.location.href = 'marksheet.html';
+    // Profile saved — wait for admin approval, do NOT redirect
+    await auth.signOut();
+    manualRedirect = false;
+    setLoading('signupBtn','signupBtnTxt',false,'Create Account');
+    // Show pending approval notice
+    document.getElementById('panelSignup').classList.remove('active');
+    document.getElementById('panelLogin').classList.add('active');
+    document.getElementById('tabLogin').classList.add('active');
+    document.getElementById('tabSignup').classList.remove('active');
+    document.getElementById('loginOkMsg').textContent =
+      '✅ Account created! Your request is pending admin approval. You will be notified once activated.';
+    document.getElementById('loginOk').classList.add('show');
   }catch(e){
     manualRedirect = false;
     setLoading('signupBtn','signupBtnTxt',false,'Create Account');
@@ -718,6 +807,66 @@ async function doSignup(){
     showErr('signupErr', msg);
   }
 }
+
+// ── FORGOT PASSWORD ──
+function showReset(){
+  document.getElementById('panelLogin').classList.remove('active');
+  document.getElementById('panelReset').classList.add('active');
+  document.getElementById('tabLogin').classList.remove('active');
+  document.getElementById('tabSignup').classList.remove('active');
+  document.getElementById('resetEmail').value = document.getElementById('liEmail').value.trim();
+  document.getElementById('resetErr').classList.remove('show');
+  document.getElementById('resetOk').classList.remove('show');
+  clearAlerts();
+}
+
+function hideReset(){
+  document.getElementById('panelReset').classList.remove('active');
+  document.getElementById('panelLogin').classList.add('active');
+  document.getElementById('tabLogin').classList.add('active');
+  document.getElementById('resetErr').classList.remove('show');
+  document.getElementById('resetOk').classList.remove('show');
+  clearAlerts();
+}
+
+async function doReset(){
+  document.getElementById('resetErr').classList.remove('show');
+  document.getElementById('resetOk').classList.remove('show');
+  const email = document.getElementById('resetEmail').value.trim();
+  if(!email){
+    document.getElementById('resetErrMsg').textContent='Please enter your email address.';
+    document.getElementById('resetErr').classList.add('show');
+    return;
+  }
+  const btn=document.getElementById('resetBtn');
+  const txt=document.getElementById('resetBtnTxt');
+  btn.disabled=true;
+  txt.innerHTML='<div class="spin"></div> Sending…';
+  try{
+    await auth.sendPasswordResetEmail(email);
+    btn.disabled=false;
+    txt.innerHTML='Send Reset Link';
+    document.getElementById('resetOkMsg').textContent='Reset link sent! Check your inbox (and spam folder).';
+    document.getElementById('resetOk').classList.add('show');
+    document.getElementById('resetEmail').value='';
+  }catch(e){
+    btn.disabled=false;
+    txt.innerHTML='Send Reset Link';
+    const msg=e.code==='auth/user-not-found'?'No account found with this email.'
+      :e.code==='auth/invalid-email'?'Please enter a valid email address.'
+      :e.code==='auth/too-many-requests'?'Too many attempts. Try again later.'
+      :e.message;
+    document.getElementById('resetErrMsg').textContent=msg;
+    document.getElementById('resetErr').classList.add('show');
+  }
+}
+
+document.addEventListener('DOMContentLoaded',function(){
+  document.getElementById('resetEmail').addEventListener('keydown',function(e){
+    if(e.key==='Enter') doReset();
+  });
+});
+
 </script>
 </body>
 </html>
