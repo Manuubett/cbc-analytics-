@@ -595,7 +595,7 @@ async function doLogin(){
   try{
     manualRedirect = true;
     await auth.signInWithEmailAndPassword(email, pass);
-    window.location.href = 'marksheet.html';
+    window.location.href = 'index.html';
   }catch(e){
     manualRedirect = false;
     setLoading('loginBtn','loginBtnTxt',false,'Sign In');
