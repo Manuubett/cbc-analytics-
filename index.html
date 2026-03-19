@@ -45,6 +45,7 @@ header{
   cursor:pointer;outline:none;height:32px
 }
 .fsel:focus{border-color:var(--accent)}
+.fsel[disabled]{background:var(--surf2);color:var(--text2);cursor:not-allowed}
 .btn{
   display:inline-flex;align-items:center;gap:5px;padding:5px 13px;
   border-radius:var(--r2);font-family:inherit;font-size:12.5px;font-weight:600;
@@ -253,7 +254,12 @@ body.dark .pct-c{background:#161d2e}
     <div><div class="lt">CBE Mark Sheet</div><div class="ls">Junior School · Kenya CBC</div></div>
   </div>
   <div class="hdr-r">
+    <div id="hdrUserInfo" style="display:none;align-items:center;gap:6px">
+      <span id="hdrUserName" style="font-size:11.5px;color:var(--text2);font-weight:700"></span>
+      <span id="hdrUserClass" style="font-size:10.5px;background:var(--alight);color:var(--accent);border:1px solid #c7d9ff;padding:2px 8px;border-radius:20px;font-weight:700"></span>
+    </div>
     <button class="btn btn-outline btn-sm" id="themeBtn">🌙</button>
+    <button class="btn btn-outline btn-sm" onclick="doLogout()" style="color:#f87171;border-color:rgba(248,113,113,.3)">🚪 Sign Out</button>
   </div>
 </header>
 
@@ -319,13 +325,14 @@ body.dark .pct-c{background:#161d2e}
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <script>
 firebase.initializeApp({
-  apiKey:"AIzaSyBdabXqlBQ-6yVNJKdu8Jhb9Cm_-59_u24",
+  apiKey:"AIzaSyBdabXqlBQ-6yVNJKdu8Zhb9Cm_-59_u24",
   authDomain:"bett-294a2.firebaseapp.com",
   projectId:"bett-294a2",
   storageBucket:"bett-294a2.appspot.com",
   messagingSenderId:"1055511650032",
   appId:"1:1055511650032:web:7e0f9c28e58515f549ac35"
 });
+
 const db   = firebase.firestore();
 const auth = firebase.auth();
 
@@ -343,16 +350,43 @@ async function initUser(fbUser){
   }
   try{
     const snap = await db.collection('users').doc(fbUser.uid).get();
-    if(!snap.exists){ toast('User profile not found','err'); return; }
+    if(!snap.exists){
+      // Profile not saved yet or deleted — sign out and go back to login
+      await auth.signOut();
+      window.location.href = 'login.html';
+      return;
+    }
     currentUser = snap.data();
     currentUser.uid = fbUser.uid;
 
+    // ── Status gate — block suspended or pending accounts ──
+    if(currentUser.status === 'suspended'){
+      await auth.signOut();
+      window.location.href = 'login.html?reason=suspended';
+      return;
+    }
+    if(currentUser.status === 'pending'){
+      await auth.signOut();
+      window.location.href = 'login.html?reason=pending';
+      return;
+    }
+
+    // Show name + class in header
+    const infoEl = el('hdrUserInfo');
+    if(infoEl) infoEl.style.display = 'flex';
+    const nameEl = el('hdrUserName');
+    if(nameEl) nameEl.textContent = '👤 ' + (currentUser.fullName || 'Teacher');
+    const classEl = el('hdrUserClass');
+
     // Teachers are locked to their assigned grade + stream
     if(currentUser.role === 'teacher'){
+      if(classEl) classEl.textContent = (currentUser.grade||'') + ' · ' + (currentUser.stream||'');
       lockTeacherSelectors();
       loadStudents();
+    } else {
+      // Admins/secretaries — show role badge
+      if(classEl) classEl.textContent = (currentUser.role||'admin').toUpperCase();
     }
-    // Admins/secretaries have full access — no restriction
   }catch(e){
     toast(`Auth error: ${e.message}`,'err');
   }
@@ -360,14 +394,20 @@ async function initUser(fbUser){
 
 function lockTeacherSelectors(){
   const sg = el('selGrade'), ss = el('selStream');
+  const grade  = currentUser.grade  || '';
+  const stream = currentUser.stream || '';
 
-  // Populate & lock Grade
-  sg.innerHTML = `<option value="${currentUser.grade}">${currentUser.grade}</option>`;
-  sg.disabled = true;
+  // Lock Grade to teacher's assigned grade
+  sg.innerHTML = `<option value="${grade}">${grade}</option>`;
+  sg.value     = grade;
+  sg.disabled  = true;
 
-  // Populate & lock Stream
-  ss.innerHTML = `<option value="${currentUser.stream}">${currentUser.stream}</option>`;
-  ss.disabled = true;
+  // Lock Stream — must be enabled so .value is readable, visually locked via CSS
+  ss.innerHTML = `<option value="${stream}">${stream}</option>`;
+  ss.value     = stream;
+  ss.disabled  = false;          // keep enabled so value is readable by loadStudents
+  ss.style.pointerEvents = 'none';
+  ss.style.opacity       = '0.7';
 }
 
 auth.onAuthStateChanged(initUser);
@@ -742,6 +782,8 @@ window.saveRow=async function(sid){
     studentId:sid, studentName:s.name, admissionNumber:s.admissionNumber||'',
     grade:el('selGrade').value, stream:el('selStream').value,
     term:el('selTerm').value,   year:el('selYear').value,
+    teacherId:   currentUser?.uid        || '',
+    teacherName: currentUser?.fullName   || '',
     ...d, updatedAt:firebase.firestore.FieldValue.serverTimestamp()
   };
   try{
@@ -834,6 +876,17 @@ if(localStorage.getItem('cbe_theme')==='dark'){
 window.addEventListener('beforeprint', function(e){
   if(currentUser?.role === 'teacher'){ e.preventDefault(); toast('Printing restricted to admin/secretary','err'); }
 });
+
+// ── Logout ──
+async function doLogout(){
+  try{
+    await auth.signOut();
+    window.location.href = 'login.html';
+  }catch(e){
+    toast('Sign out failed: '+e.message,'err');
+  }
+}
+
 </script>
 </body>
 </html>
